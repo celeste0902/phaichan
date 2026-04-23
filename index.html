@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>阮梅的猫猫糕叠叠乐 - 温柔搭档椰椰版（无API）</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #1a1a2e;
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            touch-action: none;
+            user-select: none;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #score-board {
+            font-size: 52px;
+            font-weight: 900;
+            color: #ffffff;
+            text-shadow: 0 4px 10px rgba(91, 170, 230, 0.6);
+        }
+        #tip {
+            font-size: 16px;
+            color: #ffffff;
+            background: rgba(91, 170, 230, 0.25);
+            display: inline-block;
+            padding: 8px 24px;
+            border-radius: 25px;
+            margin-top: 10px;
+            backdrop-filter: blur(10px);
+            pointer-events: auto;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.2);
+            transition: all 0.3s;
+        }
+        #tip:hover { background: rgba(91, 170, 230, 0.4); }
+
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.98);
+            padding: 30px;
+            border-radius: 24px;
+            box-shadow: 0 20px 80px rgba(0,0,0,0.5);
+            text-align: center;
+            display: none;
+            z-index: 100;
+            width: 85%;
+            max-width: 380px;
+        }
+        #ai-comment-box {
+            margin-top: 15px;
+            padding: 18px;
+            background: #fdf6f9;
+            border-radius: 18px;
+            font-size: 14.5px;
+            color: #4a4a4a;
+            line-height: 1.7;
+            min-height: 60px;
+            display: none;
+            border: 1px solid #f9e1e9;
+            text-align: left;
+            position: relative;
+        }
+        #ai-comment-box::before {
+            content: "✨ 雪顶椰椰的悄悄话 ✨";
+            display: block;
+            font-weight: bold;
+            color: #2c69b5;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 20px;
+        }
+        button {
+            padding: 14px 24px;
+            font-size: 16px;
+            background: #2c69b5;
+            color: white;
+            border: none;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 600;
+            pointer-events: auto;
+        }
+        button:active { transform: scale(0.98); }
+
+        #ai-bubble {
+            position: absolute;
+            bottom: 40px;
+            right: 25px;
+            background: white;
+            padding: 12px 18px;
+            border-radius: 20px 20px 0 20px;
+            font-size: 13px;
+            max-width: 200px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            display: none;
+            z-index: 5;
+            color: #2c3e50;
+            border: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="score-board">0</div>
+        <div id="tip" onclick="getAICheer()">✨ 看看椰椰 ✨</div>
+    </div>
+
+    <div id="ai-bubble"></div>
+
+    <div id="game-over">
+        <h2 style="color: #2c69b5; margin: 0 0 10px 0;">没站稳喵...</h2>
+        <p style="font-size: 14px; color: #7f8c8d; margin: 0;">搭档，我们这次叠了</p>
+        <p style="font-size: 56px; font-weight: bold; color: #2c69b5; margin: 5px 0;"><span id="final-score">0</span></p>
+
+        <div id="ai-comment-box"></div>
+
+        <div class="btn-group">
+            <button id="ai-btn" onclick="getAICommentary()">✨ 听听椰椰的想法 ✨</button>
+            <button onclick="resetGame()" style="background: #ecf0f1; color: #2c3e50;">再开一局吧，搭档</button>
+        </div>
+    </div>
+
+    <script>
+        const { Engine, Render, Runner, World, Bodies, Body, Composite, Events } = Matter;
+
+        let engine, render, runner;
+        let currentCake = null;
+        let score = 0;
+        let isGameOver = false;
+        let viewY = 0;
+        let targetViewY = 0;
+        let swayPhase = 0;
+        let isDropping = false;
+
+        const CAKE_WIDTH = 140;
+        const CAKE_HEIGHT = 90;
+        const VIEW_WIDTH = window.innerWidth;
+        const VIEW_HEIGHT = window.innerHeight;
+
+        const cheerMessages = [
+            "搭档，稳一点点就更漂亮了。*雪顶椰椰轻轻晃了晃尾巴，粉色肉垫在空中比了个加油手势。*",
+            "搭档，节奏很好，继续。*它眨了眨蓝色眼睛，悄悄把小爪子贴在你手边。*",
+            "搭档，这一层很有感觉。*雪顶椰椰抿唇一笑，尾巴尖轻轻勾了勾。*",
+            "搭档，不急，慢慢放最稳。*它把软乎乎的肉垫按在胸前，认真看着你。*"
+        ];
+
+        const commentLow = [
+            "搭档，这局只是热身。*雪顶椰椰轻轻蹭了蹭你的手背，粉色肉垫暖暖地贴着你。*",
+            "搭档，别难过，我知道你在认真。*它垂下耳朵又很快抬起，给你一个温柔的眼神。*"
+        ];
+
+        const commentMid = [
+            "搭档，这次发挥很稳，我很喜欢。*雪顶椰椰弯起眼睛，尾巴在身后轻轻打着拍子。*",
+            "搭档，你的手感越来越好了。*它抬起小爪，软软的肉垫和你碰了碰。*"
+        ];
+
+        const commentHigh = [
+            "搭档，你今天状态太好了，我都想认真和你比一局。*雪顶椰椰眯起眼，尾巴蓬蓬地晃出一个小弧线。*",
+            "搭档，这分数让我有点好胜心了。*它故作镇定地抱起小爪，粉色肉垫却悄悄露了出来。*"
+        ];
+
+        function pickRandom(list) {
+            return list[Math.floor(Math.random() * list.length)];
+        }
+
+        function getLocalCommentary(currentScore) {
+            if (currentScore <= 3) return pickRandom(commentLow);
+            if (currentScore <= 8) return pickRandom(commentMid);
+            return pickRandom(commentHigh);
+        }
+
+        function getAICommentary() {
+            const box = document.getElementById('ai-comment-box');
+            box.innerText = getLocalCommentary(score);
+            box.style.display = 'block';
+        }
+
+        function getAICheer() {
+            const bubble = document.getElementById('ai-bubble');
+            const tip = document.getElementById('tip');
+            if (bubble.style.display === 'block') return;
+
+            tip.innerText = "✨ 椰椰看着你... ✨";
+            bubble.innerText = pickRandom(cheerMessages);
+            bubble.style.display = 'block';
+            tip.innerText = "✨ 看看椰椰 ✨";
+
+            setTimeout(() => { bubble.style.display = 'none'; }, 5000);
+        }
+
+        function drawRoundedRect(ctx, x, y, width, height, radius) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.arcTo(x + width, y, x + width, y + height, radius);
+            ctx.arcTo(x + width, y + height, x, y + height, radius);
+            ctx.arcTo(x, y + height, x, y, radius);
+            ctx.arcTo(x, y, x + width, y, radius);
+            ctx.closePath();
+        }
+
+        function init() {
+            engine = Engine.create();
+            engine.gravity.y = 1.6;
+
+            render = Render.create({
+                element: document.body,
+                engine: engine,
+                options: {
+                    width: VIEW_WIDTH,
+                    height: VIEW_HEIGHT,
+                    wireframes: false,
+                    background: 'transparent'
+                }
+            });
+
+            const ground = Bodies.rectangle(VIEW_WIDTH / 2, VIEW_HEIGHT - 40, 320, 60, {
+                isStatic: true,
+                friction: 1,
+                render: { fillStyle: '#334155' }
+            });
+            World.add(engine.world, ground);
+
+            Render.run(render);
+            runner = Runner.create();
+            Runner.run(runner, engine);
+
+            Events.on(engine, 'beforeUpdate', () => {
+                if (!isGameOver) {
+                    updateSwaying();
+                    updateCamera();
+                    checkGameOver();
+                }
+            });
+
+            Events.on(render, 'afterRender', () => {
+                drawAllCakes();
+            });
+
+            spawnNewCake();
+
+            const handleInput = (e) => {
+                if (isGameOver || e.target.tagName === 'BUTTON' || e.target.id === 'tip') return;
+                if (e.type === 'touchstart') e.preventDefault();
+                dropCake();
+            };
+            window.addEventListener('mousedown', handleInput);
+            window.addEventListener('touchstart', handleInput, { passive: false });
+        }
+
+        function createCake(x, y, isStatic = false) {
+            return Bodies.rectangle(x, y, CAKE_WIDTH, CAKE_HEIGHT, {
+                friction: 0.95,
+                restitution: 0.02,
+                isStatic: isStatic,
+                label: 'cake',
+                render: { visible: false }
+            });
+        }
+
+        function drawAllCakes() {
+            const ctx = render.context;
+            const bodies = Composite.allBodies(engine.world);
+            ctx.save();
+            ctx.translate(0, viewY);
+            bodies.forEach(body => {
+                if (body.label === 'cake') drawCatCake(ctx, body);
+            });
+            ctx.restore();
+        }
+
+        function drawCatCake(ctx, body) {
+            const { x, y } = body.position;
+            const angle = body.angle;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(angle);
+
+            const w = CAKE_WIDTH;
+            const h = CAKE_HEIGHT;
+
+            ctx.save();
+            ctx.translate(-w/2 - 10, h/2 - 10);
+            ctx.rotate(-0.3);
+            ctx.beginPath(); ctx.fillStyle = "white"; ctx.ellipse(0, 0, 35, 15, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "#eee"; ctx.stroke();
+            ctx.fillStyle = "#e5c07b"; ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI*2); ctx.fill();
+            for (let i = 0; i < 8; i++) {
+                ctx.save(); ctx.rotate(i * Math.PI / 4); ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(14, 0); ctx.strokeStyle = "#e5c07b"; ctx.lineWidth = 2; ctx.stroke(); ctx.restore();
+            }
+            ctx.restore();
+
+            drawRoundedRect(ctx, -w/2, -h/2 + 20, w, h - 20, 10);
+            ctx.fillStyle = "#2c69b5"; ctx.fill();
+
+            ctx.beginPath(); ctx.fillStyle = "#1a4a8d"; ctx.moveTo(-w/2, 10);
+            ctx.quadraticCurveTo(-w/3, -15, -w/6, 10); ctx.quadraticCurveTo(0, -15, w/6, 10); ctx.quadraticCurveTo(w/3, -15, w/2, 10);
+            ctx.lineTo(w/2, h/2); ctx.lineTo(-w/2, h/2); ctx.fill();
+
+            ctx.beginPath(); ctx.fillStyle = "white"; ctx.moveTo(-w/4, h/2);
+            ctx.bezierCurveTo(-w/2.5, h/2, -w/2.5, 0, 0, 0); ctx.bezierCurveTo(w/2.5, 0, w/2.5, h/2, w/4, h/2); ctx.fill();
+
+            ctx.fillStyle = "white";
+            const topY = -h/2 + 20;
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath(); ctx.ellipse(-w/2 + (w/4) * i, topY, 25, 15, 0, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.beginPath(); ctx.ellipse(0, topY - 10, w/2, 20, 0, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#e5c07b"; ctx.beginPath(); ctx.arc(0, topY - 12, 8, 0, Math.PI * 2); ctx.fill();
+
+            const drawStar = (sx, sy) => {
+                ctx.save(); ctx.translate(sx, sy); ctx.fillStyle = "#e5c07b"; ctx.beginPath();
+                for (let i = 0; i < 4; i++) { ctx.rotate(Math.PI / 2); ctx.moveTo(0, -8); ctx.lineTo(3, 0); ctx.lineTo(0, 8); ctx.lineTo(-3, 0); }
+                ctx.fill(); ctx.restore();
+            };
+            drawStar(-w/2 + 15, 20); drawStar(w/2 - 15, 20);
+
+            const drawEye = (ex) => {
+                ctx.fillStyle = "#5baae6"; ctx.beginPath(); ctx.ellipse(ex, 15, 14, 20, 0, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = "white"; ctx.beginPath(); ctx.arc(ex + 4, 6, 6, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(ex - 5, 22, 3, 0, Math.PI * 2); ctx.fill();
+            };
+            drawEye(-30); drawEye(30);
+
+            ctx.beginPath(); ctx.strokeStyle = "#333"; ctx.lineWidth = 2; ctx.moveTo(-4, 26); ctx.lineTo(0, 29); ctx.lineTo(4, 26); ctx.stroke();
+
+            ctx.fillStyle = "white";
+            ctx.beginPath(); ctx.ellipse(-15, h/2 - 10, 12, 8, 0.2, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.ellipse(15, h/2 - 10, 12, 8, -0.2, 0, Math.PI * 2); ctx.fill();
+
+            ctx.restore();
+        }
+
+        function spawnNewCake() {
+            if (isGameOver) return;
+            isDropping = false; swayPhase = Math.random() * Math.PI * 2;
+            const startY = (VIEW_HEIGHT * 0.15) - viewY;
+            currentCake = createCake(VIEW_WIDTH / 2, startY, true);
+            World.add(engine.world, currentCake);
+        }
+
+        function updateSwaying() {
+            if (currentCake && currentCake.isStatic && !isDropping) {
+                swayPhase += 0.045 + (score * 0.001);
+                const range = VIEW_WIDTH * 0.38;
+                const x = VIEW_WIDTH / 2 + Math.sin(swayPhase) * range;
+                Body.setPosition(currentCake, { x: x, y: (VIEW_HEIGHT * 0.15) - viewY });
+            }
+        }
+
+        function dropCake() {
+            if (isGameOver || !currentCake || !currentCake.isStatic || isDropping) return;
+            isDropping = true; Body.setStatic(currentCake, false);
+            setTimeout(() => {
+                if (!isGameOver) {
+                    score++; document.getElementById('score-board').innerText = score;
+                    if (score > 2) targetViewY = (score - 2) * (CAKE_HEIGHT - 10);
+                    spawnNewCake();
+                }
+            }, 1200);
+        }
+
+        function updateCamera() { if (Math.abs(targetViewY - viewY) > 0.1) viewY += (targetViewY - viewY) * 0.08; }
+        function checkGameOver() {
+            const cakes = Composite.allBodies(engine.world).filter(b => b.label === 'cake');
+            cakes.forEach(cake => { if (!cake.isStatic && cake.position.y > VIEW_HEIGHT + 200 - viewY) endGame(); });
+        }
+        function endGame() { if (isGameOver) return; isGameOver = true; document.getElementById('game-over').style.display = 'block'; document.getElementById('final-score').innerText = score; }
+        function resetGame() { location.reload(); }
+        window.onload = init;
+    </script>
+</body>
+</html>
